@@ -9,21 +9,25 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // ---------- CORS CONFIGURATION ----------
+// Add your exact Vercel domain here
 const allowedOrigins = [
-    'https://bomayangu-frontend.vercel.app',  // your Vercel frontend
-    'https://bomayangu.vercel.app',          // alternative (if you use custom domain)
-    'http://localhost:3000',                 // local frontend dev
-    'http://localhost:5500',                 // local frontend dev (Live Server)
-    'http://localhost:5000'                  // local frontend dev
+    'https://bomayangu-frontend-3yqn.vercel.app', // <-- your exact domain
+    'https://bomayangu-frontend.vercel.app',      // alternative
+    'https://bomayangu.vercel.app',               // if you have a custom domain
+    'http://localhost:3000',
+    'http://localhost:5500',
+    'http://localhost:5000'
 ];
 
 app.use(cors({
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
+        // Allow if origin is in the list or if we are in development mode
         if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
             callback(null, true);
         } else {
+            console.warn(`CORS blocked: ${origin}`);
             callback(new Error('Not allowed by CORS'));
         }
     },
