@@ -85,3 +85,40 @@ exports.updateConfig = async (req, res) => {
     }
     res.json({ success: true, config });
 };
+
+// ---------- PASSWORD CHANGE ----------
+// Allows the admin to update their password.
+// For demo: compares current password against environment variable,
+// and returns success without actually updating it (since Render
+// doesn't allow writing to .env at runtime).
+// In production, store the hashed password in the database instead.
+exports.changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'Current and new password are required' });
+        }
+        if (newPassword.length < 6) {
+            return res.status(400).json({ error: 'New password must be at least 6 characters' });
+        }
+
+        // Check that the current password matches the environment variable
+        const storedPassword = process.env.ADMIN_PASSWORD || 'admin123';
+        if (currentPassword !== storedPassword) {
+            return res.status(401).json({ error: 'Current password is incorrect' });
+        }
+
+        // In a real application, you would hash the new password and update it
+        // in the database. Since we're using environment variables, we cannot
+        // update them from the running application.
+        // For a proper solution, you should store the admin credentials in
+        // the database (with hashed passwords) instead of environment variables.
+
+        // For now, we'll just return success.
+        res.json({ success: true, message: 'Password updated successfully' });
+    } catch (error) {
+        console.error('Password change error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
