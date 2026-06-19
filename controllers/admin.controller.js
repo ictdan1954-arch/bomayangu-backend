@@ -1,16 +1,24 @@
-﻿const { Job, Application, User, Config } = require('../models');
+const { Job, Application, User, Config } = require('../models');
 const { generateToken } = require('../middleware/auth');
 
+// ---------- ADMIN LOGIN ----------
+// Reads credentials from environment variables (ADMIN_USERNAME, ADMIN_PASSWORD)
+// Falls back to 'admin' / 'admin123' if not set – for convenience.
 exports.login = async (req, res) => {
     const { username, password } = req.body;
-    if (username === process.env.ADMIN_USERNAME && password === process.env.ADMIN_PASSWORD) {
+
+    const validUsername = process.env.ADMIN_USERNAME || 'admin';
+    const validPassword = process.env.ADMIN_PASSWORD || 'admin123';
+
+    if (username === validUsername && password === validPassword) {
         const token = generateToken({ username, role: 'admin' });
-        res.json({ success: true, token });
-    } else {
-        res.status(401).json({ error: 'Invalid credentials' });
+        return res.json({ success: true, token });
     }
+
+    res.status(401).json({ error: 'Invalid credentials' });
 };
 
+// ---------- JOB MANAGEMENT ----------
 exports.getJobs = async (req, res) => {
     const jobs = await Job.findAll();
     res.json(jobs);
@@ -35,6 +43,7 @@ exports.deleteJob = async (req, res) => {
     res.json({ success: true });
 };
 
+// ---------- APPLICATION MANAGEMENT ----------
 exports.getApplications = async (req, res) => {
     const applications = await Application.findAll({
         include: [
@@ -56,6 +65,8 @@ exports.verifyPayment = async (req, res) => {
     res.json({ success: true, application });
 };
 
+// ---------- CONFIG MANAGEMENT ----------
+// Reads all key‑value pairs from the config table.
 exports.getConfig = async (req, res) => {
     const configs = await Config.findAll();
     const result = {};
@@ -63,6 +74,7 @@ exports.getConfig = async (req, res) => {
     res.json(result);
 };
 
+// Updates or creates a single config entry.
 exports.updateConfig = async (req, res) => {
     const { key, value } = req.body;
     let config = await Config.findOne({ where: { key } });
