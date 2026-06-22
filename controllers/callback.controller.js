@@ -1,83 +1,74 @@
-﻿const { Application, Payment, User } = require('../models');
+const { Application, Payment, User } = require('../models');
 const NotificationService = require('../services/notification.service');
 
-exports.mpesaCallback = async (req, res) => {
+// ---------- PAYHERO CALLBACK ----------
+// Handles payment confirmations from PayHero after STK Push
+exports.payheroCallback = async (req, res) => {
     try {
-        const { Body } = req.body;
-        const { stkCallback } = Body;
+        const callbackData = req.body;
 
-        const resultCode = stkCallback.ResultCode;
-        const resultDesc = stkCallback.ResultDesc;
-        const checkoutRequestId = stkCallback.CheckoutRequestID;
+        // Extract key fields – adjust based on PayHero's actual callback structure
+        const {
+            reference,          // e.g., "APP-12345" (your account reference)
+            transaction_id,     // e.g., "TX123456"
+            status,             // e.g., "completed", "failed"
+            amount,
+            message
+        } = callbackData;
 
-        const payment = await Payment.findOne({
-            where: { checkout_request_id: checkoutRequestId }
+        // Log the raw callback for debugging
+        console.log('PayHero callback received:', callbackData);
+
+        // Find the payment record by reference (you stored it as transaction_id)
+        let payment = await Payment.findOne({
+            where: { transaction_id: reference }
         });
 
-        if (!payment) {
-            console.log(`Payment not found for checkoutRequestId: ${checkoutRequestId}`);
-            return res.json({ ResultCode: 0, ResultDesc: 'Success' });
+        // If not found by reference, try to find by transaction_id
+        if (!payment && transaction_id) {
+            payment = await Payment.findOne({
+                where: { transaction_id: transaction_id }
+            });
         }
 
-        payment.result_code = resultCode;
-        payment.result_desc = resultDesc;
-        payment.callback_data = req.body;
-        payment.status = resultCode === 0 ? 'completed' : 'failed';
+        if (!payment) {
+            console.log(`Payment not found for reference: ${reference} or transaction: ${transaction_id}`);
+            // Always return 200 OK to prevent PayHero from retrying
+            return res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
+        }
+
+        // Update payment record
+        payment.result_desc = message || status;
+        payment.callback_data = callbackData;
+        payment.status = status === 'completed' ? 'completed' : 'failed';
+        if (transaction_id) {
+            payment.transaction_id = transaction_id;
+        }
         await payment.save();
 
-        if (resultCode === 0) {
+        // If payment was successful, update the associated application
+        if (status === 'completed') {
             const application = await Application.findByPk(payment.application_id, {
                 include: [{ model: User }]
             });
+
             if (application) {
                 application.status = 'paid';
                 application.paid_at = new Date();
                 application.payment_method = 'stk_push';
-                application.transaction_id = checkoutRequestId;
+                application.transaction_id = transaction_id || reference;
                 await application.save();
 
+                // Send confirmation notification to the user
                 await NotificationService.sendPaymentConfirmation(application);
             }
         }
 
-        res.json({ ResultCode: 0, ResultDesc: 'Success' });
+        // Respond to PayHero (always 200 OK)
+        res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
     } catch (error) {
-        console.error('Callback error:', error);
-        res.json({ ResultCode: 0, ResultDesc: 'Success' });
-    }
-};
-
-exports.paybillCallback = async (req, res) => {
-    try {
-        const { transactionId, phoneNumber, amount } = req.body;
-        const payment = await Payment.findOne({
-            where: { transaction_id: transactionId, payment_method: 'paybill' }
-        });
-
-        if (!payment) {
-            return res.status(404).json({ error: 'Payment not found' });
-        }
-
-        payment.status = 'completed';
-        await payment.save();
-
-        const application = await Application.findByPk(payment.application_id, {
-            include: [{ model: User }]
-        });
-
-        if (application) {
-            application.status = 'paid';
-            application.paid_at = new Date();
-            application.payment_method = 'paybill';
-            application.transaction_id = transactionId;
-            await application.save();
-
-            await NotificationService.sendPaymentConfirmation(application);
-        }
-
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Paybill callback error:', error);
-        res.status(500).json({ error: error.message });
+        console.error('PayHero callback error:', error);
+        // Still return 200 to avoid retries
+        res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
     }
 };

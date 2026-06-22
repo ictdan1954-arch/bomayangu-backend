@@ -1,21 +1,65 @@
 const { Job, Application, User, Config } = require('../models');
 const { generateToken } = require('../middleware/auth');
+const bcrypt = require('bcryptjs');   // Make sure to install: npm install bcryptjs
+
+// ---------- HELPER: Get admin user ----------
+async function getAdminUser() {
+    // Look for a user with role 'admin'
+    let admin = await User.findOne({ where: { role: 'admin' } });
+    if (!admin) {
+        // If no admin exists, create one using environment variables (or defaults)
+        const username = process.env.ADMIN_USERNAME || 'admin';
+        const password = process.env.ADMIN_PASSWORD || 'admin123';
+        const hashedPassword = await bcrypt.hash(password, 10);
+        admin = await User.create({
+            full_name: 'Administrator',
+            id_number: '00000000',
+            phone: '0700000000',
+            email: 'admin@bomayangu.go.ke',
+            role: 'admin',
+            password: hashedPassword
+        });
+        console.log('✅ Admin user created with default credentials.');
+    }
+    return admin;
+}
 
 // ---------- ADMIN LOGIN ----------
-// Reads credentials from environment variables (ADMIN_USERNAME, ADMIN_PASSWORD)
-// Falls back to 'admin' / 'admin123' if not set – for convenience.
+// Supports both database (hashed password) and environment variable fallback.
 exports.login = async (req, res) => {
-    const { username, password } = req.body;
+    try {
+        const { username, password } = req.body;
 
-    const validUsername = process.env.ADMIN_USERNAME || 'admin';
-    const validPassword = process.env.ADMIN_PASSWORD || 'admin123';
+        // First, try to find an admin user in the database
+        const admin = await User.findOne({ where: { role: 'admin' } });
+        if (admin && admin.password) {
+            // Compare with stored hash
+            const isMatch = await bcrypt.compare(password, admin.password);
+            if (isMatch) {
+                const token = generateToken({ username, role: 'admin' });
+                return res.json({ success: true, token });
+            }
+        }
 
-    if (username === validUsername && password === validPassword) {
-        const token = generateToken({ username, role: 'admin' });
-        return res.json({ success: true, token });
+        // Fallback: compare against environment variables (for backward compatibility)
+        const validUsername = process.env.ADMIN_USERNAME || 'admin';
+        const validPassword = process.env.ADMIN_PASSWORD || 'admin123';
+        if (username === validUsername && password === validPassword) {
+            // Optionally, sync the environment credentials to the database
+            if (admin) {
+                const hashed = await bcrypt.hash(validPassword, 10);
+                await admin.update({ password: hashed });
+                console.log('✅ Synced environment credentials to database.');
+            }
+            const token = generateToken({ username, role: 'admin' });
+            return res.json({ success: true, token });
+        }
+
+        res.status(401).json({ error: 'Invalid credentials' });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    res.status(401).json({ error: 'Invalid credentials' });
 };
 
 // ---------- JOB MANAGEMENT ----------
@@ -66,7 +110,6 @@ exports.verifyPayment = async (req, res) => {
 };
 
 // ---------- CONFIG MANAGEMENT ----------
-// Reads all key‑value pairs from the config table.
 exports.getConfig = async (req, res) => {
     const configs = await Config.findAll();
     const result = {};
@@ -74,7 +117,6 @@ exports.getConfig = async (req, res) => {
     res.json(result);
 };
 
-// Updates or creates a single config entry.
 exports.updateConfig = async (req, res) => {
     const { key, value } = req.body;
     let config = await Config.findOne({ where: { key } });
@@ -87,11 +129,7 @@ exports.updateConfig = async (req, res) => {
 };
 
 // ---------- PASSWORD CHANGE ----------
-// Allows the admin to update their password.
-// For demo: compares current password against environment variable,
-// and returns success without actually updating it (since Render
-// doesn't allow writing to .env at runtime).
-// In production, store the hashed password in the database instead.
+// Updates the admin password securely in the database.
 exports.changePassword = async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
@@ -103,19 +141,35 @@ exports.changePassword = async (req, res) => {
             return res.status(400).json({ error: 'New password must be at least 6 characters' });
         }
 
-        // Check that the current password matches the environment variable
-        const storedPassword = process.env.ADMIN_PASSWORD || 'admin123';
-        if (currentPassword !== storedPassword) {
+        // Find the admin user
+        const admin = await User.findOne({ where: { role: 'admin' } });
+        if (!admin) {
+            return res.status(404).json({ error: 'Admin user not found' });
+        }
+
+        // Verify current password (check against database hash or fallback)
+        let isValid = false;
+        if (admin.password) {
+            isValid = await bcrypt.compare(currentPassword, admin.password);
+        }
+        // If database doesn't have a password, check against environment variable
+        if (!isValid) {
+            const envPassword = process.env.ADMIN_PASSWORD || 'admin123';
+            if (currentPassword === envPassword) {
+                isValid = true;
+            }
+        }
+
+        if (!isValid) {
             return res.status(401).json({ error: 'Current password is incorrect' });
         }
 
-        // In a real application, you would hash the new password and update it
-        // in the database. Since we're using environment variables, we cannot
-        // update them from the running application.
-        // For a proper solution, you should store the admin credentials in
-        // the database (with hashed passwords) instead of environment variables.
+        // Hash the new password and update the database
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await admin.update({ password: hashedPassword });
 
-        // For now, we'll just return success.
+        // Optionally, update the environment variable in memory (but not persistent)
+        // This is not recommended; use the database as the source of truth.
         res.json({ success: true, message: 'Password updated successfully' });
     } catch (error) {
         console.error('Password change error:', error);
