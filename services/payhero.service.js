@@ -7,48 +7,68 @@ class PayHeroService {
         this.baseUrl = payheroConfig.baseUrl;          // https://backend.payhero.co.ke/api/v2
         this.username = payheroConfig.username;
         this.password = payheroConfig.password;
-        this.channelId = payheroConfig.channelId;      // IMPORTANT: get this from PayHero dashboard
-        this.initiateEndpoint = payheroConfig.initiateEndpoint; // '/payments'
-        this.callbackUrl = payheroConfig.callbackUrl;
+        this.channelId = payheroConfig.channelId;      // REQUIRED: from PayHero dashboard
+        this.initiateEndpoint = payheroConfig.initiateEndpoint || '/payments';
+        this.callbackUrl = payheroConfig.callbackUrl;  // REQUIRED: your callback endpoint
         this.environment = payheroConfig.environment;
 
+        // Validate critical config
+        if (!this.channelId) {
+            console.warn('⚠️ PAYHERO_CHANNEL_ID is not set – STK Push will fail');
+        }
+        if (!this.callbackUrl) {
+            console.warn('⚠️ PAYHERO_CALLBACK_URL is not set – payment confirmations will not be received');
+        }
+
+        // Generate Basic Auth token
         this.authToken = `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}`;
 
         console.log(`🔧 PayHero service initialized: ${this.baseUrl} (${this.environment})`);
     }
 
+    /**
+     * Format phone number to local format (0XXXXXXXXX) as required by PayHero
+     * Accepts: 0712345678, 254712345678, 712345678 → returns 0712345678
+     */
     formatPhoneNumber(phoneNumber) {
-        // Accepts 0712345678 or 254712345678 → returns 0712345678 (as required by PayHero)
-        let cleaned = phoneNumber.replace(/\D/g, '');
+        let cleaned = phoneNumber.replace(/\D/g, ''); // remove non-digits
+
         if (cleaned.startsWith('254')) {
             cleaned = '0' + cleaned.substring(3);
-        }
-        // If it doesn't start with 0, assume it's already in local format
-        if (!cleaned.startsWith('0')) {
+        } else if (!cleaned.startsWith('0')) {
             cleaned = '0' + cleaned;
         }
         return cleaned;
     }
 
+    /**
+     * Initiate an STK Push payment via PayHero
+     * @param {string} phoneNumber - Customer's phone (e.g., 0712345678)
+     * @param {number} amount - Amount in KES (e.g., 78)
+     * @param {string} reference - Your unique reference (e.g., 'APP-123')
+     * @param {string} description - Customer name or description
+     * @returns {Promise<Object>} Normalized response
+     */
     async initiatePayment(phoneNumber, amount, reference, description) {
         const url = `${this.baseUrl}${this.initiateEndpoint}`;
         console.log(`🌐 Full PayHero URL: ${url}`);
 
         const formattedPhone = this.formatPhoneNumber(phoneNumber);
 
-        // Build payload according to official docs
+        // Build payload exactly as per PayHero docs
         const payload = {
             amount: amount,
             phone_number: formattedPhone,
-            channel_id: this.channelId,                 // e.g., 133 – from your dashboard
-            provider: 'm-pesa',                         // required, fixed value
-            external_reference: reference,              // your unique ref (e.g., APP-5)
+            channel_id: this.channelId,
+            provider: 'm-pesa',                         // fixed value
+            external_reference: reference,
             customer_name: description || 'Boma Yangu Job Application',
             callback_url: this.callbackUrl,
             // credential_id: optional – only if using your own Daraja keys
         };
 
         console.log(`📤 Initiating PayHero payment: ${reference} for KES ${amount} to ${formattedPhone}`);
+        // console.log('📦 Payload:', payload); // uncomment for deep debugging
 
         try {
             const response = await axios.post(url, payload, {
@@ -87,8 +107,45 @@ class PayHeroService {
         }
     }
 
-    // verifyCallback and checkPaymentStatus remain the same (they work with the callback)
-    // ...
+    /**
+     * Verify a callback from PayHero
+     * @param {Object} callbackData - Raw callback payload
+     * @returns {Object} Normalized callback data
+     */
+    verifyCallback(callbackData) {
+        console.log('📥 PayHero callback received:', {
+            reference: callbackData.reference,
+            status: callbackData.status,
+            transaction_id: callbackData.transaction_id
+        });
+
+        const normalized = {
+            reference: callbackData.reference,
+            transaction_id: callbackData.transaction_id,
+            status: callbackData.status, // 'completed', 'failed', etc.
+            amount: callbackData.amount,
+            message: callbackData.message || callbackData.result_desc,
+            raw: callbackData
+        };
+
+        // Determine success based on common PayHero response fields
+        normalized.success = normalized.status === 'completed' || normalized.status === 'success' || callbackData.result_code === 0;
+
+        return normalized;
+    }
+
+    /**
+     * Check payment status (if PayHero provides a status endpoint)
+     * Currently relies on callbacks – override if you have a status API.
+     */
+    async checkPaymentStatus(reference) {
+        console.log(`ℹ️ Payment status check requested for: ${reference}`);
+        return {
+            reference: reference,
+            status: 'pending',
+            message: 'Please wait for the callback notification'
+        };
+    }
 }
 
 module.exports = new PayHeroService();
