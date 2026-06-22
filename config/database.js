@@ -7,6 +7,19 @@ if (missing.length) {
     console.warn(`⚠️ Missing database environment variables: ${missing.join(', ')}`);
 }
 
+// ---------- DETECT DIALECT ----------
+const dialect = process.env.DIALECT || 'mysql';
+const isPostgres = dialect === 'postgres';
+const defaultPort = isPostgres ? 5432 : 3306;
+
+// ---------- SSL CONFIGURATION ----------
+// Allow SSL to be disabled via DB_SSL=false
+const sslEnabled = process.env.DB_SSL !== 'false';
+const sslOptions = sslEnabled ? {
+    require: true,
+    rejectUnauthorized: false   // Required for Aiven (MySQL) and Render (PostgreSQL) free tiers
+} : false;
+
 // ---------- DATABASE CONNECTION ----------
 const sequelize = new Sequelize(
     process.env.DB_NAME,
@@ -14,26 +27,25 @@ const sequelize = new Sequelize(
     process.env.DB_PASSWORD,
     {
         host: process.env.DB_HOST,
-        port: process.env.DB_PORT || 3306,
-        dialect: 'mysql',
+        port: parseInt(process.env.DB_PORT) || defaultPort,
+        dialect: dialect,
 
-        // SSL configuration (required for Aiven, can be toggled via env)
-        dialectOptions: {
-            ssl: process.env.DB_SSL === 'false' ? false : {
-                require: true,
-                rejectUnauthorized: false   // Required for Aiven's free tier
-            }
+        // Dialect-specific options
+        dialectOptions: isPostgres ? {
+            ssl: sslOptions
+        } : {
+            ssl: sslOptions
         },
 
         // Logging: only show SQL in development
         logging: process.env.NODE_ENV === 'development' ? console.log : false,
 
-        // Connection pool settings for production
+        // Connection pool settings
         pool: {
-            max: 10,          // Maximum number of connections
-            min: 0,           // Minimum number of idle connections
-            acquire: 30000,   // Max time (ms) to get a connection
-            idle: 10000       // Max time (ms) a connection can be idle before being released
+            max: 10,
+            min: 0,
+            acquire: 30000,
+            idle: 10000
         },
 
         // Retry logic for connection failures
@@ -47,9 +59,5 @@ const sequelize = new Sequelize(
         }
     }
 );
-
-// ---------- TEST CONNECTION ON STARTUP (optional) ----------
-// The actual test is performed in server.js, but we can add a direct check here.
-// This is done in server.js, so we keep it clean.
 
 module.exports = sequelize;
