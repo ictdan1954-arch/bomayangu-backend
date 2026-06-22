@@ -20,7 +20,6 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
         if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
             callback(null, true);
@@ -35,7 +34,6 @@ app.use(cors({
 }));
 
 // ---------- MIDDLEWARE ----------
-// Parse JSON and URL-encoded bodies with size limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -55,12 +53,25 @@ app.get('/health', (req, res) => {
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// ---------- ERROR HANDLER (must be last) ----------
+// ---------- ERROR HANDLER ----------
 app.use(errorHandler);
 
 // ---------- START SERVER ----------
 const startServer = async () => {
     try {
+        // ----- Log connection details (without password) -----
+        const dialect = process.env.DIALECT || 'mysql';
+        const host = process.env.DB_HOST;
+        const port = process.env.DB_PORT || (dialect === 'postgres' ? 5432 : 3306);
+        const database = process.env.DB_NAME;
+
+        console.log(`🔌 Attempting to connect to ${dialect} database:`);
+        console.log(`   Host: ${host}`);
+        console.log(`   Port: ${port}`);
+        console.log(`   Database: ${database}`);
+        console.log(`   User: ${process.env.DB_USER}`);
+        console.log(`   SSL: ${process.env.DB_SSL !== 'false'}`);
+
         // Test database connection
         await sequelize.authenticate();
         console.log('✅ Database connected successfully');
@@ -92,28 +103,22 @@ const startServer = async () => {
                 process.exit(0);
             });
 
-            // Force shutdown after 10 seconds if not closed
             setTimeout(() => {
                 console.error('Could not close connections in time, forcefully shutting down.');
                 process.exit(1);
             }, 10000);
         };
 
-        // Listen for termination signals
         process.on('SIGTERM', () => shutdown('SIGTERM'));
         process.on('SIGINT', () => shutdown('SIGINT'));
 
-        // Handle uncaught exceptions and rejections
         process.on('uncaughtException', (error) => {
             console.error('❌ Uncaught Exception:', error);
-            // Log and continue, but in production you may want to restart
-            // In this case, we exit cleanly
             shutdown('uncaughtException');
         });
 
         process.on('unhandledRejection', (reason, promise) => {
             console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-            // Exit cleanly
             shutdown('unhandledRejection');
         });
 
@@ -121,6 +126,7 @@ const startServer = async () => {
 
     } catch (error) {
         console.error('❌ Failed to start server:', error.message);
+        console.error('❌ Full error details:', error);
         process.exit(1);
     }
 };
