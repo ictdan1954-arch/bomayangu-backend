@@ -3,11 +3,11 @@
 
 const { Sequelize } = require('sequelize');
 
-// ---------- MySQL (source) ----------
+// ---------- MySQL (source - Aiven) ----------
 const mysqlSequelize = new Sequelize(
-    'defaultdb',                // database name (Aiven)
-    'avnadmin',                 // user (Aiven)
-    'AVNS_9zLtzHu33nxFxmCNMha', // password (Aiven)
+    'defaultdb',
+    'avnadmin',
+    'AVNS_9zLtzHu33nxFxmCNMha',
     {
         host: 'bomayangu-db-ictdan1954-4ded.a.aivencloud.com',
         port: 19402,
@@ -16,19 +16,24 @@ const mysqlSequelize = new Sequelize(
     }
 );
 
-// ---------- PostgreSQL (target) ----------
-// ✅ UPDATE THIS WITH YOUR RENDER POSTGRES INTERNAL URL
-const postgresUrl = 'postgresql://bomayangu_db_user:gHrW1xx0CkyPY6QnVyQrrv0rEHAyAUmw@dpg-d8so0qa8qa3s73chd1eg-a/bomayangu_db';
+// ---------- PostgreSQL (target - Render) ----------
+// ✅ Using EXTERNAL URL for local access (includes full domain)
+const postgresUrl = 'postgresql://bomayangu_db_user:gHrW1xx0CkyPY6QnVyQrrv0rEHAyAUmw@dpg-d8so0qa8qa3s73chd1eg-a.oregon-postgres.render.com/bomayangu_db';
 
 const postgresSequelize = new Sequelize(postgresUrl, {
     dialect: 'postgres',
-    logging: false
+    logging: false,
+    dialectOptions: {
+        ssl: {
+            require: true,
+            rejectUnauthorized: false   // Required for Render free SSL
+        }
+    }
 });
 
-// ---------- Define models (PostgreSQL compatible) ----------
+// ---------- Define models for PostgreSQL ----------
 const { DataTypes } = require('sequelize');
 
-// Define models for PostgreSQL
 const User = postgresSequelize.define('User', {
     full_name: DataTypes.STRING,
     id_number: { type: DataTypes.STRING, unique: true },
@@ -86,17 +91,18 @@ const Config = postgresSequelize.define('Config', {
 // ---------- Migration function ----------
 async function migrate() {
     try {
-        // 1. Connect to both databases
+        console.log('🔌 Connecting to MySQL (Aiven)...');
         await mysqlSequelize.authenticate();
         console.log('✅ Connected to MySQL (Aiven)');
+
+        console.log('🔌 Connecting to PostgreSQL (Render)...');
         await postgresSequelize.authenticate();
         console.log('✅ Connected to PostgreSQL (Render)');
 
-        // 2. Create tables in PostgreSQL using Sequelize sync
-        await postgresSequelize.sync({ force: true }); // Careful: drops existing tables
-        console.log('✅ PostgreSQL tables created (or replaced).');
+        console.log('📦 Creating tables in PostgreSQL...');
+        await postgresSequelize.sync({ force: true });
+        console.log('✅ PostgreSQL tables created.');
 
-        // 3. Copy data from MySQL to PostgreSQL
         const tables = ['users', 'jobs', 'applications', 'payments', 'config'];
         const ModelMap = {
             users: User,
@@ -107,6 +113,7 @@ async function migrate() {
         };
 
         for (const table of tables) {
+            console.log(`📥 Copying ${table}...`);
             const [rows] = await mysqlSequelize.query(`SELECT * FROM ${table}`);
             if (rows.length === 0) {
                 console.log(`⏭️ ${table} has no rows – skipping.`);
@@ -118,6 +125,7 @@ async function migrate() {
         }
 
         console.log('✅ Migration completed successfully!');
+        console.log('🎉 Your data is now in Render PostgreSQL!');
     } catch (error) {
         console.error('❌ Migration error:', error);
     } finally {
