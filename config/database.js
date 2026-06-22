@@ -13,11 +13,10 @@ const isPostgres = dialect === 'postgres';
 const defaultPort = isPostgres ? 5432 : 3306;
 
 // ---------- SSL CONFIGURATION ----------
-// Allow SSL to be disabled via DB_SSL=false
 const sslEnabled = process.env.DB_SSL !== 'false';
 const sslOptions = sslEnabled ? {
     require: true,
-    rejectUnauthorized: false   // Required for Aiven (MySQL) and Render (PostgreSQL) free tiers
+    rejectUnauthorized: false   // Required for free tiers
 } : false;
 
 // ---------- DATABASE CONNECTION ----------
@@ -29,26 +28,18 @@ const sequelize = new Sequelize(
         host: process.env.DB_HOST,
         port: parseInt(process.env.DB_PORT) || defaultPort,
         dialect: dialect,
-
-        // Dialect-specific options
-        dialectOptions: isPostgres ? {
-            ssl: sslOptions
-        } : {
-            ssl: sslOptions
+        dialectOptions: {
+            ssl: sslOptions,
+            // Increase timeout for SSL handshake
+            connectTimeout: 60000
         },
-
-        // Logging: only show SQL in development
         logging: process.env.NODE_ENV === 'development' ? console.log : false,
-
-        // Connection pool settings
         pool: {
             max: 10,
             min: 0,
-            acquire: 30000,
+            acquire: 60000,      // Increased from 30000
             idle: 10000
         },
-
-        // Retry logic for connection failures
         retry: {
             max: 3,
             match: [
