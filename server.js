@@ -15,10 +15,8 @@ const allowedOrigins = [
     'https://bomayangu.vercel.app',
     'http://localhost:3000',
     'http://localhost:5500',
-    'http://localhost:5000',
-    // Add your actual frontend URL here – replace with your domain
-    'https://your-frontend-domain.vercel.app',  // <-- CHANGE THIS
-    'https://your-custom-domain.com'            // <-- ADD YOUR DOMAIN
+    'http://localhost:5000'
+    // Add your actual frontend URL here if needed
 ];
 
 app.use(cors({
@@ -34,7 +32,8 @@ app.use(cors({
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    // ✅ Added Cache-Control and Pragma to allow custom headers from frontend
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma']
 }));
 
 // ---------- MIDDLEWARE ----------
