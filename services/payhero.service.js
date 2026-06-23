@@ -11,10 +11,8 @@ class PayHeroService {
         this.callbackUrl = payheroConfig.callbackUrl;
         this.environment = payheroConfig.environment;
 
-        // ✅ Log the channel ID (masked for security)
         console.log(`📦 Channel ID: ${this.channelId || 'NOT SET'}`);
 
-        // Validate critical config
         if (!this.channelId) {
             console.warn('⚠️ PAYHERO_CHANNEL_ID is not set – STK Push will fail');
         }
@@ -43,10 +41,11 @@ class PayHeroService {
 
         const formattedPhone = this.formatPhoneNumber(phoneNumber);
 
+        // 🔑 FIX: Ensure amount and channel_id are numbers, not strings
         const payload = {
-            amount: amount,
+            amount: parseFloat(amount),                     // convert to number
             phone_number: formattedPhone,
-            channel_id: this.channelId,
+            channel_id: parseInt(this.channelId, 10),       // convert to integer
             provider: 'm-pesa',
             external_reference: reference,
             customer_name: description || 'Boma Yangu Job Application',
@@ -54,7 +53,7 @@ class PayHeroService {
         };
 
         console.log(`📤 Initiating PayHero payment: ${reference} for KES ${amount} to ${formattedPhone}`);
-        // console.log('📦 Payload:', payload);
+        console.log('📦 Payload:', payload); // ← now we can see the exact payload
 
         try {
             const response = await axios.post(url, payload, {
