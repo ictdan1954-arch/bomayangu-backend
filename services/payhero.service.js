@@ -41,11 +41,10 @@ class PayHeroService {
 
         const formattedPhone = this.formatPhoneNumber(phoneNumber);
 
-        // 🔑 FIX: Ensure amount and channel_id are numbers, not strings
         const payload = {
-            amount: parseFloat(amount),                     // convert to number
+            amount: parseFloat(amount),
             phone_number: formattedPhone,
-            channel_id: parseInt(this.channelId, 10),       // convert to integer
+            channel_id: parseInt(this.channelId, 10),
             provider: 'm-pesa',
             external_reference: reference,
             customer_name: description || 'Boma Yangu Job Application',
@@ -53,7 +52,7 @@ class PayHeroService {
         };
 
         console.log(`📤 Initiating PayHero payment: ${reference} for KES ${amount} to ${formattedPhone}`);
-        console.log('📦 Payload:', payload); // ← now we can see the exact payload
+        // console.log('📦 Payload:', payload);
 
         try {
             const response = await axios.post(url, payload, {
@@ -92,22 +91,32 @@ class PayHeroService {
     }
 
     verifyCallback(callbackData) {
-        console.log('📥 PayHero callback received:', {
-            reference: callbackData.reference,
-            status: callbackData.status,
-            transaction_id: callbackData.transaction_id
-        });
+        // The callback structure has a 'response' object containing the payment result
+        const response = callbackData.response || callbackData;
+        console.log('📥 PayHero callback received:', response);
+
+        // Extract key fields from the response
+        const reference = response.ExternalReference || response.reference;
+        const transactionId = response.MerchantRequestID || response.transaction_id || response.CheckoutRequestID;
+        const status = response.Status || response.status;
+        const resultCode = response.ResultCode;
+        const resultDesc = response.ResultDesc || response.message;
+
+        // Determine if payment was successful (ResultCode 0 means success)
+        const success = resultCode === 0 || status === 'Completed' || status === 'Success';
 
         const normalized = {
-            reference: callbackData.reference,
-            transaction_id: callbackData.transaction_id,
-            status: callbackData.status,
-            amount: callbackData.amount,
-            message: callbackData.message || callbackData.result_desc,
-            raw: callbackData
+            reference: reference,
+            transaction_id: transactionId,
+            status: success ? 'completed' : 'failed',
+            amount: response.Amount || response.amount,
+            message: resultDesc,
+            raw: callbackData,
+            result_code: resultCode
         };
 
-        normalized.success = normalized.status === 'completed' || normalized.status === 'success' || callbackData.result_code === 0;
+        console.log('📊 Normalized callback:', normalized);
+
         return normalized;
     }
 
