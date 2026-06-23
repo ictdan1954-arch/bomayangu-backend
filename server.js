@@ -15,11 +15,15 @@ const allowedOrigins = [
     'https://bomayangu.vercel.app',
     'http://localhost:3000',
     'http://localhost:5500',
-    'http://localhost:5000'
+    'http://localhost:5000',
+    // Add your actual frontend URL here – replace with your domain
+    'https://your-frontend-domain.vercel.app',  // <-- CHANGE THIS
+    'https://your-custom-domain.com'            // <-- ADD YOUR DOMAIN
 ];
 
 app.use(cors({
     origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
         if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
             callback(null, true);
