@@ -52,7 +52,7 @@ class PayHeroService {
         };
 
         console.log(`📤 Initiating PayHero payment: ${reference} for KES ${amount} to ${formattedPhone}`);
-        // console.log('📦 Payload:', payload);
+        console.log('📦 Payload:', payload);
 
         try {
             const response = await axios.post(url, payload, {
@@ -72,7 +72,7 @@ class PayHeroService {
 
             return {
                 success: true,
-                transaction_id: response.data?.reference,
+                transaction_id: response.data?.reference,          // This is the MerchantRequestID
                 checkout_request_id: response.data?.CheckoutRequestID,
                 merchant_request_id: null,
                 reference: reference,
@@ -91,32 +91,39 @@ class PayHeroService {
     }
 
     verifyCallback(callbackData) {
-        // The callback structure has a 'response' object containing the payment result
-        const response = callbackData.response || callbackData;
-        console.log('📥 PayHero callback received:', response);
+        console.log('📥 Raw callback received:', JSON.stringify(callbackData, null, 2));
 
-        // Extract key fields from the response
-        const reference = response.ExternalReference || response.reference;
-        const transactionId = response.MerchantRequestID || response.transaction_id || response.CheckoutRequestID;
-        const status = response.Status || response.status;
+        // Extract the inner 'response' object (if present)
+        const response = callbackData.response || callbackData;
+
+        // Log the extracted response for debugging
+        console.log('📥 Extracted response object:', JSON.stringify(response, null, 2));
+
+        // Extract fields with multiple fallbacks
+        const merchantRequestId = response.MerchantRequestID || response.merchant_request_id || response.transaction_id;
+        const externalReference = response.ExternalReference || response.external_reference || response.reference;
+        const checkoutRequestId = response.CheckoutRequestID || response.checkout_request_id;
         const resultCode = response.ResultCode;
         const resultDesc = response.ResultDesc || response.message;
+        const status = response.Status || response.status;
+        const amount = response.Amount || response.amount;
 
-        // Determine if payment was successful (ResultCode 0 means success)
-        const success = resultCode === 0 || status === 'Completed' || status === 'Success';
+        // Determine success: ResultCode 0 means success, or status 'Completed'/'Success'
+        const isSuccess = resultCode === 0 || status === 'Completed' || status === 'Success' || status === true;
 
         const normalized = {
-            reference: reference,
-            transaction_id: transactionId,
-            status: success ? 'completed' : 'failed',
-            amount: response.Amount || response.amount,
-            message: resultDesc,
+            reference: externalReference,              // Our own reference (APP-...)
+            transaction_id: merchantRequestId,         // MerchantRequestID (unique from PayHero)
+            checkout_request_id: checkoutRequestId,
+            status: isSuccess ? 'completed' : 'failed',
+            amount: amount,
+            message: resultDesc || 'No description',
             raw: callbackData,
-            result_code: resultCode
+            result_code: resultCode,
+            success: isSuccess
         };
 
         console.log('📊 Normalized callback:', normalized);
-
         return normalized;
     }
 
