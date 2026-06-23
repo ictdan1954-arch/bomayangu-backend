@@ -5,7 +5,7 @@ const router = express.Router();
 const jobRoutes = require('./job.routes');
 const applicationRoutes = require('./application.routes');
 const paymentRoutes = require('./payment.routes');
-const callbackRoutes = require('./callback.routes');
+// const callbackRoutes = require('./callback.routes'); // ← REMOVED – handled inside paymentRoutes now
 const adminRoutes = require('./admin.routes');
 
 // Import Config model for public config route
@@ -28,8 +28,8 @@ router.get('/config/public', async (req, res) => {
 // ---------- API ROUTES ----------
 router.use('/jobs', jobRoutes);
 router.use('/applications', applicationRoutes);
-router.use('/payments', paymentRoutes);
-router.use('/callback', callbackRoutes);
+router.use('/payments', paymentRoutes);          // ← includes /callback now
+// router.use('/callback', callbackRoutes);     // ← REMOVED – no longer needed
 router.use('/admin', adminRoutes);
 
 // ---------- OPTIONAL: Root route (for API info) ----------
@@ -41,7 +41,7 @@ router.get('/', (req, res) => {
             jobs: '/api/jobs',
             applications: '/api/applications',
             payments: '/api/payments',
-            callback: '/api/callback',
+            callback: '/api/payments/callback',   // updated to reflect new location
             admin: '/api/admin',
             config_public: '/api/config/public'
         }
