@@ -2,6 +2,36 @@ const { Job, Application, User, Config } = require('../models');
 const { generateToken } = require('../middleware/auth');
 const bcrypt = require('bcryptjs');
 
+// ---------- HELPER: Retry database queries ----------
+async function withRetry(fn, maxRetries = 3, delay = 1000) {
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            // Only retry on connection errors
+            const connectionErrors = [
+                /SequelizeConnectionError/,
+                /SequelizeConnectionAcquireTimeoutError/,
+                /SequelizeConnectionRefusedError/,
+                /SequelizeHostNotFoundError/,
+                /SequelizeHostNotReachableError/,
+                /SequelizeInvalidConnectionError/,
+                /SequelizeConnectionTimedOutError/,
+                /Connection terminated unexpectedly/
+            ];
+            const shouldRetry = connectionErrors.some(re => re.test(error.message) || re.test(error.parent?.message));
+            if (!shouldRetry || attempt === maxRetries) {
+                throw error;
+            }
+            console.warn(`⚠️ Database connection error, retrying... (${attempt}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delay * attempt));
+        }
+    }
+    throw lastError;
+}
+
 // ---------- HELPER: Ensure admin user exists ----------
 async function getAdminUser() {
     let admin = await User.findOne({ where: { role: 'admin' } });
@@ -51,10 +81,11 @@ exports.login = async (req, res) => {
 // ---------- JOB MANAGEMENT ----------
 exports.getJobs = async (req, res) => {
     try {
-        // ✅ FIXED: use snake_case column name for ordering
-        const jobs = await Job.findAll({
-            order: [['created_at', 'DESC']] // or use ['id', 'DESC']
-        });
+        const jobs = await withRetry(() =>
+            Job.findAll({
+                order: [['created_at', 'DESC']]
+            })
+        );
         res.json(jobs);
     } catch (error) {
         console.error('Get jobs error:', error);
@@ -64,7 +95,7 @@ exports.getJobs = async (req, res) => {
 
 exports.createJob = async (req, res) => {
     try {
-        const job = await Job.create(req.body);
+        const job = await withRetry(() => Job.create(req.body));
         res.status(201).json(job);
     } catch (error) {
         console.error('Create job error:', error);
@@ -74,9 +105,9 @@ exports.createJob = async (req, res) => {
 
 exports.updateJob = async (req, res) => {
     try {
-        const job = await Job.findByPk(req.params.id);
+        const job = await withRetry(() => Job.findByPk(req.params.id));
         if (!job) return res.status(404).json({ error: 'Job not found' });
-        await job.update(req.body);
+        await withRetry(() => job.update(req.body));
         res.json(job);
     } catch (error) {
         console.error('Update job error:', error);
@@ -86,9 +117,9 @@ exports.updateJob = async (req, res) => {
 
 exports.deleteJob = async (req, res) => {
     try {
-        const job = await Job.findByPk(req.params.id);
+        const job = await withRetry(() => Job.findByPk(req.params.id));
         if (!job) return res.status(404).json({ error: 'Job not found' });
-        await job.destroy();
+        await withRetry(() => job.destroy());
         res.json({ success: true });
     } catch (error) {
         console.error('Delete job error:', error);
@@ -99,13 +130,15 @@ exports.deleteJob = async (req, res) => {
 // ---------- APPLICATION MANAGEMENT ----------
 exports.getApplications = async (req, res) => {
     try {
-        const applications = await Application.findAll({
-            include: [
-                { model: User },
-                { model: Job }
-            ],
-            order: [['created_at', 'DESC']] // also fix here
-        });
+        const applications = await withRetry(() =>
+            Application.findAll({
+                include: [
+                    { model: User },
+                    { model: Job }
+                ],
+                order: [['created_at', 'DESC']]
+            })
+        );
         res.json(applications);
     } catch (error) {
         console.error('Get applications error:', error);
@@ -115,12 +148,12 @@ exports.getApplications = async (req, res) => {
 
 exports.verifyPayment = async (req, res) => {
     try {
-        const application = await Application.findByPk(req.params.id);
+        const application = await withRetry(() => Application.findByPk(req.params.id));
         if (!application) return res.status(404).json({ error: 'Application not found' });
         application.status = 'paid';
         application.paid_at = new Date();
         application.payment_method = req.body.payment_method || 'manual';
-        await application.save();
+        await withRetry(() => application.save());
         res.json({ success: true, application });
     } catch (error) {
         console.error('Verify payment error:', error);
@@ -133,9 +166,11 @@ const ALLOWED_CONFIG_KEYS = ['stk_enabled', 'application_fee', 'application_end_
 
 exports.getConfig = async (req, res) => {
     try {
-        const configs = await Config.findAll({
-            where: { key: ALLOWED_CONFIG_KEYS }
-        });
+        const configs = await withRetry(() =>
+            Config.findAll({
+                where: { key: ALLOWED_CONFIG_KEYS }
+            })
+        );
         const result = {};
         configs.forEach(c => result[c.key] = c.value);
         if (!result.stk_enabled) result.stk_enabled = 'true';
@@ -154,6 +189,7 @@ exports.updateConfig = async (req, res) => {
         if (!ALLOWED_CONFIG_KEYS.includes(key)) {
             return res.status(400).json({ error: 'Invalid config key' });
         }
+
         let parsedValue = value;
         if (key === 'stk_enabled') {
             parsedValue = (value === 'true' || value === true) ? 'true' : 'false';
@@ -169,16 +205,22 @@ exports.updateConfig = async (req, res) => {
             }
             parsedValue = value;
         }
-        let config = await Config.findOne({ where: { key } });
-        if (config) {
-            await config.update({ value: parsedValue });
-        } else {
-            config = await Config.create({ key, value: parsedValue });
-        }
+
+        // Use retry for both find and update/create
+        const config = await withRetry(async () => {
+            let config = await Config.findOne({ where: { key } });
+            if (config) {
+                await config.update({ value: parsedValue });
+            } else {
+                config = await Config.create({ key, value: parsedValue });
+            }
+            return config;
+        });
+
         res.json({ success: true, config });
     } catch (error) {
         console.error('Update config error:', error);
-        res.status(500).json({ error: 'Failed to update config' });
+        res.status(500).json({ error: 'Database error – please try again later' });
     }
 };
 
