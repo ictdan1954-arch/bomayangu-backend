@@ -1,12 +1,11 @@
 const { Job, Application, User, Config } = require('../models');
 const { generateToken } = require('../middleware/auth');
-const bcrypt = require('bcryptjs');   // npm install bcryptjs
+const bcrypt = require('bcryptjs');
 
 // ---------- HELPER: Ensure admin user exists ----------
 async function getAdminUser() {
     let admin = await User.findOne({ where: { role: 'admin' } });
     if (!admin) {
-        // Create admin from environment variables (or defaults)
         const username = process.env.ADMIN_USERNAME || 'admin';
         const password = process.env.ADMIN_PASSWORD || 'admin123';
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -18,7 +17,7 @@ async function getAdminUser() {
             role: 'admin',
             password: hashedPassword
         });
-        console.log(' Admin user created with default credentials.');
+        console.log('✅ Admin user created with default credentials.');
     }
     return admin;
 }
@@ -27,27 +26,20 @@ async function getAdminUser() {
 exports.login = async (req, res) => {
     try {
         const { username, password } = req.body;
-
-        // Ensure admin exists
         const admin = await getAdminUser();
-
-        // Compare against stored hash
         const isValid = await bcrypt.compare(password, admin.password);
         if (!isValid) {
-            // Fallback to environment variables (for backward compatibility)
             const envUsername = process.env.ADMIN_USERNAME || 'admin';
             const envPassword = process.env.ADMIN_PASSWORD || 'admin123';
             if (username === envUsername && password === envPassword) {
-                // Sync env credentials to database
                 const hashed = await bcrypt.hash(envPassword, 10);
                 await admin.update({ password: hashed });
-                console.log(' Synced environment credentials to database.');
+                console.log('✅ Synced environment credentials to database.');
                 const token = generateToken({ username, role: 'admin' });
                 return res.json({ success: true, token });
             }
             return res.status(401).json({ error: 'Invalid credentials' });
         }
-
         const token = generateToken({ username: admin.username || username, role: 'admin' });
         res.json({ success: true, token });
     } catch (error) {
@@ -59,7 +51,10 @@ exports.login = async (req, res) => {
 // ---------- JOB MANAGEMENT ----------
 exports.getJobs = async (req, res) => {
     try {
-        const jobs = await Job.findAll({ order: [['createdAt', 'DESC']] });
+        // ✅ FIXED: use snake_case column name for ordering
+        const jobs = await Job.findAll({
+            order: [['created_at', 'DESC']] // or use ['id', 'DESC']
+        });
         res.json(jobs);
     } catch (error) {
         console.error('Get jobs error:', error);
@@ -109,7 +104,7 @@ exports.getApplications = async (req, res) => {
                 { model: User },
                 { model: Job }
             ],
-            order: [['created_at', 'DESC']]
+            order: [['created_at', 'DESC']] // also fix here
         });
         res.json(applications);
     } catch (error) {
@@ -134,7 +129,6 @@ exports.verifyPayment = async (req, res) => {
 };
 
 // ---------- CONFIG MANAGEMENT ----------
-// Allowed config keys (paybill removed)
 const ALLOWED_CONFIG_KEYS = ['stk_enabled', 'application_fee', 'application_end_date'];
 
 exports.getConfig = async (req, res) => {
@@ -144,7 +138,6 @@ exports.getConfig = async (req, res) => {
         });
         const result = {};
         configs.forEach(c => result[c.key] = c.value);
-        // Ensure all keys exist with defaults
         if (!result.stk_enabled) result.stk_enabled = 'true';
         if (!result.application_fee) result.application_fee = '78';
         if (!result.application_end_date) result.application_end_date = '2026-08-13';
@@ -161,8 +154,6 @@ exports.updateConfig = async (req, res) => {
         if (!ALLOWED_CONFIG_KEYS.includes(key)) {
             return res.status(400).json({ error: 'Invalid config key' });
         }
-
-        // Type conversion and validation
         let parsedValue = value;
         if (key === 'stk_enabled') {
             parsedValue = (value === 'true' || value === true) ? 'true' : 'false';
@@ -178,8 +169,6 @@ exports.updateConfig = async (req, res) => {
             }
             parsedValue = value;
         }
-
-        // Upsert
         let config = await Config.findOne({ where: { key } });
         if (config) {
             await config.update({ value: parsedValue });
@@ -203,13 +192,9 @@ exports.changePassword = async (req, res) => {
         if (newPassword.length < 6) {
             return res.status(400).json({ error: 'New password must be at least 6 characters' });
         }
-
         const admin = await getAdminUser();
-
-        // Verify current password (database hash or fallback)
         let isValid = await bcrypt.compare(currentPassword, admin.password);
         if (!isValid) {
-            // Fallback to environment variable
             const envPassword = process.env.ADMIN_PASSWORD || 'admin123';
             if (currentPassword === envPassword) {
                 isValid = true;
@@ -218,11 +203,8 @@ exports.changePassword = async (req, res) => {
         if (!isValid) {
             return res.status(401).json({ error: 'Current password is incorrect' });
         }
-
-        // Hash and update
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         await admin.update({ password: hashedPassword });
-
         res.json({ success: true, message: 'Password updated successfully' });
     } catch (error) {
         console.error('Password change error:', error);
