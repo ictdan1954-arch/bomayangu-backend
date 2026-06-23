@@ -1,4 +1,4 @@
-const { Application, User, Job } = require('../models');
+const { Application, User, Job, Config } = require('../models'); // ← added Config
 
 // ---------- HELPER: Validate required fields ----------
 const validateApplicationData = (data) => {
@@ -65,16 +65,20 @@ exports.create = async (req, res) => {
             return res.status(404).json({ error: 'Job not found' });
         }
 
-        // 5. Create application
+        // 5. Get the current application fee from Config
+        const config = await Config.findOne({ where: { key: 'application_fee' } });
+        const fee = config ? parseFloat(config.value) : 78; // fallback to 78 if not set
+
+        // 6. Create application with the live fee
         const application = await Application.create({
             user_id: user.id,
             job_id: job.id,
             job_title: job.title,
             status: 'pending',
-            amount: 78
+            amount: fee // ← now uses the live fee from admin
         });
 
-        // 6. Return success response
+        // 7. Return success response
         res.status(201).json({
             success: true,
             applicationId: application.id,
