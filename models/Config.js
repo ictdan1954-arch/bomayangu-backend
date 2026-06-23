@@ -21,22 +21,19 @@ module.exports = (sequelize, DataTypes) => {
                     msg: 'Config key must be between 1 and 100 characters'
                 }
             },
-            comment: 'Configuration key (e.g., application_fee, paybill_number)'
+            comment: 'Configuration key (e.g., application_fee, stk_enabled)'
         },
         value: {
             type: DataTypes.TEXT,
             allowNull: true,
-            validate: {
-                // Optionally, you can add custom validation here
-                // e.g., check if value is a valid JSON or number
-            },
             comment: 'Configuration value (text, number, JSON, or boolean)'
         }
     }, {
         tableName: 'config',
         timestamps: true,
-        updatedAt: 'updated_at',
-        createdAt: false,  // Config values don't need a creation timestamp
+        underscored: true,          // 🔑 CRITICAL: use snake_case column names
+        createdAt: false,           // We don't need created_at for config
+        updatedAt: 'updated_at',    // Explicit mapping for updated_at
         indexes: [
             {
                 unique: true,
