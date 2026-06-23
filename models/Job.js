@@ -62,8 +62,9 @@ module.exports = (sequelize, DataTypes) => {
     }, {
         tableName: 'jobs',
         timestamps: true,
-        createdAt: 'created_at',
-        updatedAt: 'updated_at',
+        underscored: true,          // 🔑 CRITICAL: use snake_case column names
+        createdAt: 'created_at',    // explicit mapping (optional but safe)
+        updatedAt: 'updated_at',    // explicit mapping (optional but safe)
         indexes: [
             {
                 fields: ['category']
