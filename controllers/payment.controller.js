@@ -1,7 +1,6 @@
 const { Application, Payment } = require('../models');
 const payheroService = require('../services/payhero.service');
 
-// ---------- INITIATE STK PUSH ----------
 exports.initiateSTKPush = async (req, res) => {
     try {
         const { applicationId, phoneNumber } = req.body;
@@ -21,11 +20,12 @@ exports.initiateSTKPush = async (req, res) => {
             `Boma Yangu - ${application.job_title || 'Application'}`
         );
 
+        // Store the MerchantRequestID as transaction_id
         await Payment.create({
             application_id: applicationId,
             amount: fee,
             phone: phoneNumber,
-            transaction_id: result.transaction_id,   // this is the PayHero reference (ExternalReference)
+            transaction_id: result.transaction_id,        // ← MerchantRequestID
             checkout_request_id: result.checkout_request_id,
             status: 'pending',
             provider: 'payhero',
@@ -43,43 +43,50 @@ exports.initiateSTKPush = async (req, res) => {
     }
 };
 
-// ---------- HANDLE PAYHERO CALLBACK ----------
 exports.handleCallback = async (req, res) => {
     try {
         const callbackData = req.body;
-        console.log('📥 Raw callback received:', JSON.stringify(callbackData, null, 2));
+        console.log('📥 Raw callback received (controller):', JSON.stringify(callbackData, null, 2));
 
         const normalized = payheroService.verifyCallback(callbackData);
-        console.log('📊 Normalized callback:', normalized);
+        console.log('📊 Normalized callback (controller):', JSON.stringify(normalized, null, 2));
 
-        // Find payment by our transaction_id (which stores the ExternalReference)
-        const payment = await Payment.findOne({
-            where: { transaction_id: normalized.reference }
-        });
-
-        if (!payment) {
-            console.warn('⚠️ Payment not found for reference:', normalized.reference);
-            // Acknowledge receipt anyway
-            return res.status(200).send('OK');
+        // Try to find payment by MerchantRequestID first, then fallback to ExternalReference
+        let payment = null;
+        if (normalized.transaction_id) {
+            payment = await Payment.findOne({
+                where: { transaction_id: normalized.transaction_id }
+            });
         }
 
-        console.log(`🔍 Payment found: ID ${payment.id}, current status: ${payment.status}`);
+        // If not found and we have a reference, try by external_reference (our own reference)
+        if (!payment && normalized.reference) {
+            payment = await Payment.findOne({
+                where: { transaction_id: normalized.reference } // in case we stored our ref as transaction_id
+            });
+        }
 
-        // Update payment
+        if (!payment) {
+            // Last resort: try to find by application_id if we can extract it from the reference
+            console.warn('⚠️ Payment not found for transaction_id:', normalized.transaction_id, 'or reference:', normalized.reference);
+            return res.status(404).send('Payment not found');
+        }
+
+        // Update payment record
         payment.status = normalized.success ? 'completed' : 'failed';
         payment.paid_at = normalized.success ? new Date() : null;
         payment.payment_response = callbackData;
         await payment.save();
         console.log(`✅ Payment ${payment.id} status updated to ${payment.status}`);
 
-        // Update application
+        // Update the associated application
         const application = await Application.findByPk(payment.application_id);
         if (application) {
             if (normalized.success) {
                 application.status = 'paid';
                 application.paid_at = new Date();
                 application.payment_method = 'stk_push';
-                application.transaction_id = normalized.reference;
+                application.transaction_id = normalized.transaction_id || normalized.reference;
             } else {
                 application.status = 'payment_failed';
             }
@@ -96,7 +103,6 @@ exports.handleCallback = async (req, res) => {
     }
 };
 
-// ---------- GET PAYMENT STATUS ----------
 exports.getPaymentStatus = async (req, res) => {
     try {
         const { reference } = req.params;
