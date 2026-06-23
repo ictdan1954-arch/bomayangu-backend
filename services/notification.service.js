@@ -5,26 +5,18 @@
 // Uncomment and install the provider packages you need:
 // const twilio = require('twilio');
 // const nodemailer = require('nodemailer');
-// const axios = require('axios'); // for HTTP-based SMS providers
 
 class NotificationService {
     constructor() {
         // ---------- SMS CONFIGURATION ----------
-        // Option 1: Twilio
+        this.smsProvider = process.env.SMS_PROVIDER || 'log'; // 'twilio', 'africastalking', 'vonage', 'log'
         this.twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
         this.twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
         this.twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
-
-        // Option 2: Africa's Talking
         this.africasTalkingUsername = process.env.AFRICAS_TALKING_USERNAME;
         this.africasTalkingApiKey = process.env.AFRICAS_TALKING_API_KEY;
-
-        // Option 3: Vonage (formerly Nexmo)
         this.vonageApiKey = process.env.VONAGE_API_KEY;
         this.vonageApiSecret = process.env.VONAGE_API_SECRET;
-
-        // Default provider (set via environment variable)
-        this.smsProvider = process.env.SMS_PROVIDER || 'log'; // 'twilio', 'africastalking', 'vonage', 'log'
 
         // ---------- EMAIL CONFIGURATION ----------
         this.emailHost = process.env.EMAIL_HOST || 'smtp.gmail.com';
@@ -33,10 +25,8 @@ class NotificationService {
         this.emailPassword = process.env.EMAIL_PASSWORD;
         this.emailFrom = process.env.EMAIL_FROM || this.emailUser || 'noreply@bomayangu.go.ke';
 
-        // Initialize email transporter if credentials are provided
+        // Initialize clients if credentials exist
         this.emailEnabled = !!(this.emailUser && this.emailPassword);
-
-        // Initialize SMS client if credentials are provided
         this.smsEnabled = this.initSmsClient();
 
         console.log(`📨 Notification service initialized. SMS: ${this.smsEnabled ? 'ENABLED' : 'DISABLED (logging only)'}`);
@@ -45,7 +35,6 @@ class NotificationService {
 
     // ---------- INITIALIZE SMS CLIENT ----------
     initSmsClient() {
-        // If using Twilio
         if (this.smsProvider === 'twilio' && this.twilioAccountSid && this.twilioAuthToken) {
             try {
                 // this.twilioClient = twilio(this.twilioAccountSid, this.twilioAuthToken);
@@ -55,43 +44,30 @@ class NotificationService {
                 return false;
             }
         }
-        // If using Africa's Talking
         if (this.smsProvider === 'africastalking' && this.africasTalkingApiKey) {
             // const AfricasTalking = require('africastalking');
-            // this.atClient = AfricasTalking({
-            //     apiKey: this.africasTalkingApiKey,
-            //     username: this.africasTalkingUsername || 'sandbox'
-            // });
+            // this.atClient = AfricasTalking({ apiKey: this.africasTalkingApiKey, username: this.africasTalkingUsername || 'sandbox' });
             return true;
         }
-        // If using Vonage
         if (this.smsProvider === 'vonage' && this.vonageApiKey) {
             // const vonage = require('@vonage/server-sdk');
-            // this.vonageClient = new vonage({
-            //     apiKey: this.vonageApiKey,
-            //     apiSecret: this.vonageApiSecret
-            // });
+            // this.vonageClient = new vonage({ apiKey: this.vonageApiKey, apiSecret: this.vonageApiSecret });
             return true;
         }
-        // Default to logging
         return false;
     }
 
     // ---------- SEND SMS ----------
     async sendSMS(phone, message) {
-        // Format phone number to international format
         const formattedPhone = this.formatPhoneNumber(phone);
-
         console.log(`📱 Sending SMS to ${formattedPhone}: ${message.substring(0, 50)}...`);
 
-        // If no SMS provider is configured, just log
         if (!this.smsEnabled) {
             console.log(`📱 [SIMULATED] SMS to ${formattedPhone}: ${message}`);
             return { success: true, simulated: true };
         }
 
         try {
-            // ---------- TWILIO ----------
             if (this.smsProvider === 'twilio' && this.twilioClient) {
                 // const result = await this.twilioClient.messages.create({
                 //     body: message,
@@ -103,7 +79,6 @@ class NotificationService {
                 return { success: true };
             }
 
-            // ---------- AFRICA'S TALKING ----------
             if (this.smsProvider === 'africastalking' && this.atClient) {
                 // const result = await this.atClient.SMS.send({
                 //     to: [formattedPhone],
@@ -115,7 +90,6 @@ class NotificationService {
                 return { success: true };
             }
 
-            // ---------- VONAGE ----------
             if (this.smsProvider === 'vonage' && this.vonageClient) {
                 // const result = await this.vonageClient.sms.send({
                 //     from: 'BomaYangu',
@@ -127,13 +101,11 @@ class NotificationService {
                 return { success: true };
             }
 
-            // Fallback to simulated
             console.log(`📱 [SIMULATED] SMS to ${formattedPhone}: ${message}`);
             return { success: true, simulated: true };
 
         } catch (error) {
             console.error(`❌ SMS send error to ${formattedPhone}:`, error.message);
-            // Don't throw – log and return false so the main flow continues
             return { success: false, error: error.message };
         }
     }
@@ -142,33 +114,25 @@ class NotificationService {
     async sendEmail(email, subject, message) {
         console.log(`📧 Sending email to ${email}: ${subject}`);
 
-        // If email is not configured, just log
         if (!this.emailEnabled) {
             console.log(`📧 [SIMULATED] Email to ${email}: ${subject}`);
             return { success: true, simulated: true };
         }
 
         try {
-            // Create transporter on demand
             // const transporter = nodemailer.createTransport({
             //     host: this.emailHost,
             //     port: this.emailPort,
             //     secure: this.emailPort === 465,
-            //     auth: {
-            //         user: this.emailUser,
-            //         pass: this.emailPassword
-            //     }
+            //     auth: { user: this.emailUser, pass: this.emailPassword }
             // });
-
-            // const mailOptions = {
+            // const info = await transporter.sendMail({
             //     from: this.emailFrom,
             //     to: email,
             //     subject: subject,
             //     text: message,
             //     html: `<p>${message.replace(/\n/g, '<br>')}</p>`
-            // };
-
-            // const info = await transporter.sendMail(mailOptions);
+            // });
             // return { success: true, messageId: info.messageId };
 
             console.log(`📧 [SIMULATED] Email to ${email}: ${subject}`);
@@ -193,12 +157,9 @@ class NotificationService {
     }
 
     // ---------- NOTIFICATION FLOWS ----------
-
-    // Send confirmation after application submission
     async sendApplicationConfirmation(application) {
         try {
             const message = `Dear ${application.User?.full_name || 'Applicant'},\n\nYour application for the position of "${application.job_title}" has been received successfully.\n\nPlease keep your documents ready for verification. You will receive a payment confirmation once your application fee is processed.\n\nThank you for applying through Boma Yangu Jobs.`;
-
             const emailSubject = 'Application Confirmation - Boma Yangu Jobs';
 
             if (application.User?.email) {
@@ -214,11 +175,9 @@ class NotificationService {
         }
     }
 
-    // Send confirmation after payment is completed
     async sendPaymentConfirmation(application) {
         try {
             const message = `Dear ${application.User?.full_name || 'Applicant'},\n\nPayment of KES ${application.amount || 78} for your application to "${application.job_title}" has been confirmed.\n\nWe will contact you shortly regarding the next steps, including verification and interviews.\n\nThank you for choosing Boma Yangu Jobs.`;
-
             const emailSubject = 'Payment Confirmed - Boma Yangu Jobs';
 
             if (application.User?.email) {
@@ -234,7 +193,6 @@ class NotificationService {
         }
     }
 
-    // Send a custom notification (generic)
     async sendCustomNotification(user, subject, message, type = 'both') {
         try {
             if (type === 'sms' || type === 'both') {
