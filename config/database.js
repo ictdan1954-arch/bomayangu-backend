@@ -30,23 +30,31 @@ const sequelize = new Sequelize(
         dialect: dialect,
         dialectOptions: {
             ssl: sslOptions,
-            // Increase timeout for SSL handshake
-            connectTimeout: 60000
+            keepAlive: true,                     // Keep connections alive
+            keepAliveInitialDelayMillis: 0,      // Send keep‑alive immediately
+            connectTimeout: 60000                // SSL handshake timeout
         },
         logging: process.env.NODE_ENV === 'development' ? console.log : false,
         pool: {
-            max: 10,
+            max: 5,
             min: 0,
-            acquire: 60000,      // Increased from 30000
-            idle: 10000
+            idle: 10000,          // Release idle connections after 10s
+            acquire: 30000,       // Timeout if can't acquire
+            evict: 1000           // Check idle connections every second
         },
         retry: {
             max: 3,
             match: [
                 /SequelizeConnectionError/,
+                /SequelizeConnectionAcquireTimeoutError/,
                 /SequelizeConnectionRefusedError/,
-                /SequelizeHostNotFoundError/
-            ]
+                /SequelizeHostNotFoundError/,
+                /SequelizeHostNotReachableError/,
+                /SequelizeInvalidConnectionError/,
+                /SequelizeConnectionTimedOutError/
+            ],
+            backoffBase: 1000,
+            backoffExponent: 1.5
         }
     }
 );
