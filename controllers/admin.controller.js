@@ -1,13 +1,12 @@
 const { Job, Application, User, Config } = require('../models');
 const { generateToken } = require('../middleware/auth');
-const bcrypt = require('bcryptjs');   // Make sure to install: npm install bcryptjs
+const bcrypt = require('bcryptjs');   // npm install bcryptjs
 
-// ---------- HELPER: Get admin user ----------
+// ---------- HELPER: Ensure admin user exists ----------
 async function getAdminUser() {
-    // Look for a user with role 'admin'
     let admin = await User.findOne({ where: { role: 'admin' } });
     if (!admin) {
-        // If no admin exists, create one using environment variables (or defaults)
+        // Create admin from environment variables (or defaults)
         const username = process.env.ADMIN_USERNAME || 'admin';
         const password = process.env.ADMIN_PASSWORD || 'admin123';
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -19,43 +18,38 @@ async function getAdminUser() {
             role: 'admin',
             password: hashedPassword
         });
-        console.log('✅ Admin user created with default credentials.');
+        console.log(' Admin user created with default credentials.');
     }
     return admin;
 }
 
 // ---------- ADMIN LOGIN ----------
-// Supports both database (hashed password) and environment variable fallback.
 exports.login = async (req, res) => {
     try {
         const { username, password } = req.body;
 
-        // First, try to find an admin user in the database
-        const admin = await User.findOne({ where: { role: 'admin' } });
-        if (admin && admin.password) {
-            // Compare with stored hash
-            const isMatch = await bcrypt.compare(password, admin.password);
-            if (isMatch) {
+        // Ensure admin exists
+        const admin = await getAdminUser();
+
+        // Compare against stored hash
+        const isValid = await bcrypt.compare(password, admin.password);
+        if (!isValid) {
+            // Fallback to environment variables (for backward compatibility)
+            const envUsername = process.env.ADMIN_USERNAME || 'admin';
+            const envPassword = process.env.ADMIN_PASSWORD || 'admin123';
+            if (username === envUsername && password === envPassword) {
+                // Sync env credentials to database
+                const hashed = await bcrypt.hash(envPassword, 10);
+                await admin.update({ password: hashed });
+                console.log(' Synced environment credentials to database.');
                 const token = generateToken({ username, role: 'admin' });
                 return res.json({ success: true, token });
             }
+            return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        // Fallback: compare against environment variables (for backward compatibility)
-        const validUsername = process.env.ADMIN_USERNAME || 'admin';
-        const validPassword = process.env.ADMIN_PASSWORD || 'admin123';
-        if (username === validUsername && password === validPassword) {
-            // Optionally, sync the environment credentials to the database
-            if (admin) {
-                const hashed = await bcrypt.hash(validPassword, 10);
-                await admin.update({ password: hashed });
-                console.log('✅ Synced environment credentials to database.');
-            }
-            const token = generateToken({ username, role: 'admin' });
-            return res.json({ success: true, token });
-        }
-
-        res.status(401).json({ error: 'Invalid credentials' });
+        const token = generateToken({ username: admin.username || username, role: 'admin' });
+        res.json({ success: true, token });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -64,76 +58,145 @@ exports.login = async (req, res) => {
 
 // ---------- JOB MANAGEMENT ----------
 exports.getJobs = async (req, res) => {
-    const jobs = await Job.findAll();
-    res.json(jobs);
+    try {
+        const jobs = await Job.findAll({ order: [['createdAt', 'DESC']] });
+        res.json(jobs);
+    } catch (error) {
+        console.error('Get jobs error:', error);
+        res.status(500).json({ error: 'Failed to fetch jobs' });
+    }
 };
 
 exports.createJob = async (req, res) => {
-    const job = await Job.create(req.body);
-    res.status(201).json(job);
+    try {
+        const job = await Job.create(req.body);
+        res.status(201).json(job);
+    } catch (error) {
+        console.error('Create job error:', error);
+        res.status(500).json({ error: 'Failed to create job' });
+    }
 };
 
 exports.updateJob = async (req, res) => {
-    const job = await Job.findByPk(req.params.id);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    await job.update(req.body);
-    res.json(job);
+    try {
+        const job = await Job.findByPk(req.params.id);
+        if (!job) return res.status(404).json({ error: 'Job not found' });
+        await job.update(req.body);
+        res.json(job);
+    } catch (error) {
+        console.error('Update job error:', error);
+        res.status(500).json({ error: 'Failed to update job' });
+    }
 };
 
 exports.deleteJob = async (req, res) => {
-    const job = await Job.findByPk(req.params.id);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    await job.destroy();
-    res.json({ success: true });
+    try {
+        const job = await Job.findByPk(req.params.id);
+        if (!job) return res.status(404).json({ error: 'Job not found' });
+        await job.destroy();
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete job error:', error);
+        res.status(500).json({ error: 'Failed to delete job' });
+    }
 };
 
 // ---------- APPLICATION MANAGEMENT ----------
 exports.getApplications = async (req, res) => {
-    const applications = await Application.findAll({
-        include: [
-            { model: User },
-            { model: Job }
-        ],
-        order: [['created_at', 'DESC']]
-    });
-    res.json(applications);
+    try {
+        const applications = await Application.findAll({
+            include: [
+                { model: User },
+                { model: Job }
+            ],
+            order: [['created_at', 'DESC']]
+        });
+        res.json(applications);
+    } catch (error) {
+        console.error('Get applications error:', error);
+        res.status(500).json({ error: 'Failed to fetch applications' });
+    }
 };
 
 exports.verifyPayment = async (req, res) => {
-    const application = await Application.findByPk(req.params.id);
-    if (!application) return res.status(404).json({ error: 'Application not found' });
-    application.status = 'paid';
-    application.paid_at = new Date();
-    application.payment_method = req.body.payment_method || 'manual';
-    await application.save();
-    res.json({ success: true, application });
+    try {
+        const application = await Application.findByPk(req.params.id);
+        if (!application) return res.status(404).json({ error: 'Application not found' });
+        application.status = 'paid';
+        application.paid_at = new Date();
+        application.payment_method = req.body.payment_method || 'manual';
+        await application.save();
+        res.json({ success: true, application });
+    } catch (error) {
+        console.error('Verify payment error:', error);
+        res.status(500).json({ error: 'Failed to verify payment' });
+    }
 };
 
 // ---------- CONFIG MANAGEMENT ----------
+// Allowed config keys (paybill removed)
+const ALLOWED_CONFIG_KEYS = ['stk_enabled', 'application_fee', 'application_end_date'];
+
 exports.getConfig = async (req, res) => {
-    const configs = await Config.findAll();
-    const result = {};
-    configs.forEach(c => result[c.key] = c.value);
-    res.json(result);
+    try {
+        const configs = await Config.findAll({
+            where: { key: ALLOWED_CONFIG_KEYS }
+        });
+        const result = {};
+        configs.forEach(c => result[c.key] = c.value);
+        // Ensure all keys exist with defaults
+        if (!result.stk_enabled) result.stk_enabled = 'true';
+        if (!result.application_fee) result.application_fee = '78';
+        if (!result.application_end_date) result.application_end_date = '2026-08-13';
+        res.json(result);
+    } catch (error) {
+        console.error('Get config error:', error);
+        res.status(500).json({ error: 'Failed to fetch config' });
+    }
 };
 
 exports.updateConfig = async (req, res) => {
-    const { key, value } = req.body;
-    let config = await Config.findOne({ where: { key } });
-    if (config) {
-        await config.update({ value });
-    } else {
-        config = await Config.create({ key, value });
+    try {
+        const { key, value } = req.body;
+        if (!ALLOWED_CONFIG_KEYS.includes(key)) {
+            return res.status(400).json({ error: 'Invalid config key' });
+        }
+
+        // Type conversion and validation
+        let parsedValue = value;
+        if (key === 'stk_enabled') {
+            parsedValue = (value === 'true' || value === true) ? 'true' : 'false';
+        } else if (key === 'application_fee') {
+            const num = parseFloat(value);
+            if (isNaN(num) || num < 0) {
+                return res.status(400).json({ error: 'Fee must be a positive number' });
+            }
+            parsedValue = String(num);
+        } else if (key === 'application_end_date') {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+                return res.status(400).json({ error: 'Invalid date format (YYYY-MM-DD)' });
+            }
+            parsedValue = value;
+        }
+
+        // Upsert
+        let config = await Config.findOne({ where: { key } });
+        if (config) {
+            await config.update({ value: parsedValue });
+        } else {
+            config = await Config.create({ key, value: parsedValue });
+        }
+        res.json({ success: true, config });
+    } catch (error) {
+        console.error('Update config error:', error);
+        res.status(500).json({ error: 'Failed to update config' });
     }
-    res.json({ success: true, config });
 };
 
-// ---------- PASSWORD CHANGE ----------
-// Updates the admin password securely in the database.
+// ---------- ADMIN PASSWORD CHANGE ----------
 exports.changePassword = async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
-
         if (!currentPassword || !newPassword) {
             return res.status(400).json({ error: 'Current and new password are required' });
         }
@@ -141,35 +204,25 @@ exports.changePassword = async (req, res) => {
             return res.status(400).json({ error: 'New password must be at least 6 characters' });
         }
 
-        // Find the admin user
-        const admin = await User.findOne({ where: { role: 'admin' } });
-        if (!admin) {
-            return res.status(404).json({ error: 'Admin user not found' });
-        }
+        const admin = await getAdminUser();
 
-        // Verify current password (check against database hash or fallback)
-        let isValid = false;
-        if (admin.password) {
-            isValid = await bcrypt.compare(currentPassword, admin.password);
-        }
-        // If database doesn't have a password, check against environment variable
+        // Verify current password (database hash or fallback)
+        let isValid = await bcrypt.compare(currentPassword, admin.password);
         if (!isValid) {
+            // Fallback to environment variable
             const envPassword = process.env.ADMIN_PASSWORD || 'admin123';
             if (currentPassword === envPassword) {
                 isValid = true;
             }
         }
-
         if (!isValid) {
             return res.status(401).json({ error: 'Current password is incorrect' });
         }
 
-        // Hash the new password and update the database
+        // Hash and update
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         await admin.update({ password: hashedPassword });
 
-        // Optionally, update the environment variable in memory (but not persistent)
-        // This is not recommended; use the database as the source of truth.
         res.json({ success: true, message: 'Password updated successfully' });
     } catch (error) {
         console.error('Password change error:', error);
