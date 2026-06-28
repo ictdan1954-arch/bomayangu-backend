@@ -10,13 +10,24 @@ const PORT = process.env.PORT || 5000;
 
 // ---------- CORS CONFIGURATION ----------
 const allowedOrigins = [
+    // Production frontend domains
+    'https://bomayangu.site',
+    'https://www.bomayangu.site',
+    // Vercel preview URLs (keep for safety)
     'https://bomayangu-frontend-3yqn.vercel.app',
     'https://bomayangu-frontend.vercel.app',
     'https://bomayangu.vercel.app',
+    // Local development
     'http://localhost:3000',
     'http://localhost:5500',
-    'http://localhost:5000'
-    // Add your actual frontend URL here if needed
+    'http://localhost:5000',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5500',
+    'http://127.0.0.1:5000',
+    // IPv6 loopback (for local dev)
+    'http://[::1]:3000',
+    'http://[::1]:5500',
+    'http://[::1]:5000',
 ];
 
 app.use(cors({
@@ -32,7 +43,6 @@ app.use(cors({
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    // ✅ Added Cache-Control and Pragma to allow custom headers from frontend
     allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma']
 }));
 
@@ -62,7 +72,6 @@ app.use(errorHandler);
 // ---------- START SERVER ----------
 const startServer = async () => {
     try {
-        // ----- Log connection details (without password) -----
         const dialect = process.env.DIALECT || 'mysql';
         const host = process.env.DB_HOST;
         const port = process.env.DB_PORT || (dialect === 'postgres' ? 5432 : 3306);
@@ -75,11 +84,9 @@ const startServer = async () => {
         console.log(`   User: ${process.env.DB_USER}`);
         console.log(`   SSL: ${process.env.DB_SSL !== 'false'}`);
 
-        // Test database connection
         await sequelize.authenticate();
         console.log('✅ Database connected successfully');
 
-        // Sync models in development mode only
         if (process.env.NODE_ENV === 'development') {
             await sequelize.sync({ alter: true });
             console.log('✅ Database synced (development)');
@@ -87,12 +94,11 @@ const startServer = async () => {
             console.log('✅ Production mode – skipping auto-sync');
         }
 
-        // Start listening
         const server = app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
         });
 
-        // ---------- GRACEFUL SHUTDOWN ----------
+        // Graceful shutdown
         const shutdown = async (signal) => {
             console.log(`\n📴 Received ${signal}. Shutting down gracefully...`);
             server.close(async () => {
@@ -134,5 +140,4 @@ const startServer = async () => {
     }
 };
 
-// ---------- BOOT ----------
 startServer();
